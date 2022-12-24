@@ -202,9 +202,292 @@ OUTPUT: <br/>
 
 <h3> Forecasting </h3>
 
+**Step 8. ARIMA Modeling** <br/>
 
+```r
+#1. Predict
+pred_arima = forecast(amz2_arima, h = 4)
+
+#2. Plot the prediction
+plot(pred_arima,
+     grid.col = NA,
+     yaxis.right = FALSE,
+     main = 'AMZN Price Forecast - Quarterly (Avg)' ,
+     ylab = 'Adj. Close Price (USD)',
+     col='orange',
+     lwd=2,
+)
+
+#3. Plot the actual series
+plot(xts_test[,2],
+     grid.col = NA,
+     yaxis.right = FALSE,
+     main = 'AMZN Price Actual - Quarterly (Avg)' ,
+     xlab = 'Date',
+     ylab = 'Adj. Close Price (USD)',
+     col='orange',
+     lwd=2,
+)
+```
+
+OUTPUT: <br/>
+<img src="https://i.imgur.com/2dkh2my.png" height="80%" width="80%" alt="AMZN trend"/> <br/>
+
+***Findings:*** According to the ARIMA-based forecast the quarterly average value of AMZN is predicted to grow till the end of 2022.
+
+<br />
+
+<h3> Multivariate Time Series Analysis: Studying AMZN Combined with the WUI and NASDAQ </h3>
+
+NOTE: "WUI" stands for "World Uncertainty Indicator", which is an indicator measuring global geopolitical risk.
+
+**Step 9. Exploration of WUI and NASDAQ** <br/>
+
+WUI:<br/>
+
+```r
+wui = xts_df[,6]
+
+plot(wui,
+     grid.col = NA,
+     yaxis.right = FALSE,
+     main = 'World Uncertainty Index - Quarterly' )
+lines(wui, col = 'black', lwd=2)
+
+stl_wui = mstl(wui, s.window='periodic',robust=TRUE)
+autoplot(stl_wui)
+
+wui_arima = auto.arima(wui, approximation = TRUE, stepwise = FALSE)
+wui_arima
+```
+
+OUTPUT:<br/>
+<img src="https://i.imgur.com/dAb65Yu.png" height="80%" width="80%" alt="AMZN trend"/> <br/>
+
+NASDAQ:<br/>
+
+```r
+ixic = xts_df[,1]
+
+plot(ixic,
+     grid.col = NA,
+     yaxis.right = FALSE,
+     main = 'NASDAQ Composite Index - Quarterly (Avg)' )
+lines(ixic, col = 'blue', lwd=2)
+
+stl_ixic = mstl(ixic, s.window='periodic',robust=TRUE)
+autoplot(stl_ixic)
+
+ixic_arima = auto.arima(ixic, approximation = TRUE, stepwise = FALSE)
+ixic_arima
+```
+
+OUTPUT:<br/>
+<img src="https://i.imgur.com/fILgEdQ.png" height="80%" width="80%" alt="AMZN trend"/> 
+
+<br />
+
+**Step 10.1. Transforming AMZN, WUI, and NASDAQ (Need to Be Stationary)** <br/>
+
+```r
+#AMZN transformation: ARIMA(1,2,1)
+
+#Step1. Log
+
+amz_log = log(amz)
+
+#Step 2. 1st Differencing
+
+amz_diff = diff(amz_log)
+
+#Step 3. Visualize 
+
+autoplot(amz)
+autoplot(amz_log)
+autoplot(amz_diff)
+
+#Step 4. AdfTest --> Success: Stationary
+
+adfTest(amz_diff)
+
+
+#IXIC transformation: ARIMA(4,2,0)
+
+#Step1. Log
+
+ixic_log = log(ixic)
+
+#Step2. 1st Differencing
+
+ixic_diff = diff(ixic_log)
+
+#Step3. Visualize
+
+autoplot(ixic)
+autoplot(ixic_log)
+autoplot(ixic_diff)
+
+#Step4. AdfTest --> Success: Stationary
+
+adfTest(ixic_diff)
+
+
+#WUI transformation: ARIMA(0,1,4)
+
+#Step1. First Differencing
+
+wui_diff = diff(wui)
+
+#Step2. Visualize
+
+autoplot(wui)
+autoplot(wui_diff)
+
+#Step 3. AdfTest --> Success
+
+adfTest(wui_diff)
+```
+
+**Step 10.2. Multivariate Time Series Analysis: Vector Autoregression** <br/>
+
+```r
+#Transformation caused the 1st value to be null, need to remove for VAR
+
+amz_diff = amz_diff[-1,]
+ixic_diff = ixic_diff[-1,]
+wui_diff = wui_diff[-1,]
+
+##Model A. VAR
+
+#Step1. Build the TS with the stationary series
+
+ts_diff = cbind(amz_diff,ixic_diff,wui_diff)
+
+#Step2. VAR
+
+var1 = VAR(ts_diff, type = "const", lag.max = 8, season = NULL, exogen = NULL, ic="AIC")
+
+summary(var1)
+
+
+##Model B. EVAR
+
+#Step 1. Create a ts with the endogenous vars (AMZ and IXIC)
+amz_ixic = cbind(amz_diff,ixic_diff)
+
+#Step 2. Run the VAR
+
+var2 = VAR(amz_ixic, type = "const", lag.max = 8, season = NULL, exogen = wui_diff, ic="AIC")
+
+summary(var2)
+
+##PREDICT
+var_for1 = predict(var1, n.ahead=4, ci = 0.95)
+fanchart(var_for1)
+
+var_for2 = predict(var2, n.ahead=4, ci = 0.95)
+fanchart(var_for2)
+```
+
+OUTPUT:<br/>
+<img src="https://i.imgur.com/QhNSFVU.png" height="80%" width="80%" alt="AMZN trend"/> 
+
+<br />
+
+**Step 11. Multivariate Time Series Analysis: Granger Causality** <br/>
+
+The causality function in R simultaneously implements two versions of the Test. The traditional Granger Causality Test attempts to understand whether knowing the past behavior of a time series improves the understanding of the future behavior of another time series. The Instantaneous Granger Causality Test, instead, strives to understand whether knowing the future behavior of a time series is useful to realize the future behavior of another time series. <br/>
+
+
+```r
+#Step1. Need to create the var models
+
+amz_wui = cbind(amz_diff,wui_diff)
+var_amz_wui = VAR(amz_wui, type = "const",lag.max = 8, season = NULL, exogen = NULL, ic="AIC")
+
+ixic_wui = cbind(ixic_diff,wui_diff)
+var_ixic_wui = VAR(ixic_wui, type = "const",lag.max = 8, season = NULL, exogen = NULL, ic="AIC")
+
+amz_ixic = cbind(amz_diff,ixic_diff)
+var_amz_ixic = VAR(amz_ixic, type = "const",lag.max = 8, season = NULL, exogen = NULL, ic="AIC")
+
+#Step 2. Granger Causality Test
+
+#A. AMZ and WUI
+grangerA_amzCwui = causality(var_amz_wui, cause = 'AMZN')
+grangerA_wuiCamz = causality(var_amz_wui, cause = 'WUI')
+
+grangerA_amzCwui
+grangerA_wuiCamz
+
+#B. IXIC and WUI
+
+grangerA_ixicCwui = causality(var_ixic_wui, cause = 'IXIC')
+grangerA_wuiCixic = causality(var_ixic_wui, cause = 'WUI')
+
+grangerA_ixicCwui
+grangerA_wuiCixic
+
+#C. AMZ and IXIC
+
+grangerA_amzCixic = causality(var_amz_ixic, cause = 'AMZN')
+grangerA_ixicCamz = causality(var_amz_ixic, cause = 'IXIC')
+
+grangerA_amzCixic
+grangerA_ixicCamz
+```
+
+OUTPUT:<br/>
+<img src="https://i.imgur.com/aIpweOE.png" height="80%" width="80%" alt="AMZN trend"/> 
+
+<br/ >
+
+**Step 12. Multivariate Time Series Analysis: The Impulse-Response Function** <br/>
+
+Called impulse-response function (IRF) gauges the reaction of a time series to the shock of another time series. The function is even more powerful when paired with the variance decomposition function (FEVD), which explains what portion of the reaction is caused by the time series itself or by the shock.<br/>
+
+```r
+#AMZN Response
+irf1_amz = irf(var1,impulse='WUI', response = 'AMZN', n.ahead = 10, boot = TRUE,run=500,ci=.95)
+
+plot(irf1,
+     ylab = 'AMZN Returns',
+     main = 'Amazon.com Stock Returns Response to WUI Shock'
+)
+
+#IXIC Response
+irf1_ixic = irf(var1,impulse='WUI', response = 'IXIC', n.ahead = 10, boot = TRUE,run=500,ci=.95)  
+
+plot(irf1_ixic,
+     ylab = 'IXIC Returns',
+     main = 'NASDAQ Returns Response to WUI Shock'
+)
+
+##Variance decomposition ##
+#How much of the response is caused by the shock? And how much by the ts itself?
+
+vd1 = fevd(var1, n.ahead = 8) #Important to focus on the 1st model
+plot(vd1)
+
+vd2 = fevd(var2, n.ahead = 8) #Important to focus on the 1st model
+plot(vd12)
+```
+
+OUTPUT 1:<br/>
+<img src="https://i.imgur.com/8CbS5PZ.png" height="80%" width="80%" alt="AMZN trend"/> 
+
+***Findings:*** It is evident that Amazon’s stocks are more sensitive to geopolitical shocks compared to the NASDAQ. This is perfectly logical from a financial standpoint as the numerous different companies englobed in the NASDAQ composite index make the average quarterly returns on the IXIC relatively more insensitive to any kind of exogenous shock, while generating persistent positive returns only in the long run.<br/>
+
+OUTPUT 2:<br/>
+<img src="https://i.imgur.com/hBQFU8Q.png" height="80%" width="80%" alt="AMZN trend"/> 
+
+***Findings:*** It is remarkable that most of the response in the returns on AMZN are caused by the behavior of AMZN returns themselves, although there is still a minor share of the response that is attributed to the shock in the WUI. What is more, while most of the response of the returns on the IXIC are caused by the IXIC itself, about 40% of the response of the quarterly average returns on the IXIC to a shock in the WUI are also caused by the behavior of the AMZN stock.<br/>
+
+<br />
 
 </p>
+
+
 
 <!--
  ```diff

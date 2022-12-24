@@ -1,4 +1,4 @@
-<h1> Art Auction Prices: Dataset Generation With Scraping</h1>
+<h1> AMAZON.COM, STOCK MARKETS, AND GEOPOLITICAL RISK: A TIME SERIES ANALYSIS </h1>
 
 <p align="center">
 
